@@ -23,17 +23,60 @@ const app = express();
 app.use(express.json());
 
 // Dynamic CORS to support localhost and Vercel domains with credentials
-app.use(cors({
+const corsOptions = {
   origin: true,
   credentials: true,
-}));
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Cookie", "X-Requested-With"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // 2. Parse Cookies (populates req.cookies)
 app.use(cookieParser());
 
-// API health check
+// Database Connection Helper with caching for serverless environments
+let isConnected = false;
+
+const connectDB = async () => {
+  if (isConnected || mongoose.connection.readyState >= 1) {
+    isConnected = true;
+    return;
+  }
+
+  if (!process.env.MONGO_URI) {
+    throw new Error("MONGO_URI is missing. Please add MONGO_URI to your Vercel Project Settings > Environment Variables.");
+  }
+
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    isConnected = true;
+    console.log("Connected to MongoDB");
+  } catch (err) {
+    console.error("Database connection error:", err);
+    throw new Error(`Database connection failed: ${err.message}`);
+  }
+};
+
+// API health check (responds immediately without requiring database)
 app.get("/api", (req, res) => {
-  res.json({ success: true, message: "ShopKart API is running" });
+  res.json({ 
+    success: true, 
+    message: "ShopKart API is running on Vercel",
+    dbConnected: mongoose.connection.readyState >= 1
+  });
+});
+
+// Database connection middleware - runs for all incoming API routes
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("Database connection middleware error:", err);
+    res.status(500).json({ success: false, message: err.message || "Database connection failed" });
+  }
 });
 
 // 3. Mount routes (both with and without /api prefix for flexibility)
@@ -48,41 +91,6 @@ const routes = [
 routes.forEach(([routePath, router]) => {
   app.use(routePath, router);
   app.use(`/api${routePath}`, router);
-});
-
-// Database Connection Helper with caching for serverless environments
-let isConnected = false;
-
-const connectDB = async () => {
-  if (isConnected || mongoose.connection.readyState >= 1) {
-    isConnected = true;
-    return;
-  }
-
-  if (!process.env.MONGO_URI) {
-    console.error("Warning: MONGO_URI is not defined in environment variables");
-    return;
-  }
-
-  try {
-    await mongoose.connect(process.env.MONGO_URI);
-    isConnected = true;
-    console.log("Connected to MongoDB");
-  } catch (err) {
-    console.error("Database connection error:", err);
-    throw err;
-  }
-};
-
-// Database connection middleware for serverless requests
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error("Database connection middleware error:", err);
-    res.status(500).json({ success: false, message: "Database connection failed" });
-  }
 });
 
 // Start Server for local development (skipped when running as Vercel Serverless Function)

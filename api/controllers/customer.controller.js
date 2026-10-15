@@ -112,10 +112,11 @@ export const loginCustomer = async (req, res) => {
     const token = genToken(customer._id);
 
     // Store JWT inside an HttpOnly cookie
+    const isProduction = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
     res.cookie("token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
     });
 
@@ -159,10 +160,11 @@ export const getProfile = async (req, res) => {
 
 export const logoutCustomer = async (req, res) => {
   try{
+    const isProduction = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
     res.clearCookie("token", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
     });
 
     return res.status(200).json({
