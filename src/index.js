@@ -22,34 +22,78 @@ const app = express();
 // 1. Parse JSON bodies (req.body)
 app.use(express.json());
 
+// Dynamic CORS to support localhost and Vercel domains with credentials
 app.use(cors({
-    origin: "http://localhost:5173",   
-    credentials: true,
+  origin: true,
+  credentials: true,
 }));
 
 // 2. Parse Cookies (populates req.cookies)
 app.use(cookieParser());
 
-// 3. Mount routes
-app.use("/customers", customerRoutes);
-app.use("/products", productRoutes);
-app.use("/wishlist", wishlistRoutes);
-app.use("/cart", cartRoutes);
-app.use("/orders", orderRoutes);
+// API health check
+app.get("/api", (req, res) => {
+  res.json({ success: true, message: "ShopKart API is running" });
+});
 
-// Database Connection & Start Server
+// 3. Mount routes (both with and without /api prefix for flexibility)
+const routes = [
+  ["/customers", customerRoutes],
+  ["/products", productRoutes],
+  ["/wishlist", wishlistRoutes],
+  ["/cart", cartRoutes],
+  ["/orders", orderRoutes],
+];
+
+routes.forEach(([routePath, router]) => {
+  app.use(routePath, router);
+  app.use(`/api${routePath}`, router);
+});
+
+// Database Connection Helper with caching for serverless environments
+let isConnected = false;
+
+const connectDB = async () => {
+  if (isConnected || mongoose.connection.readyState >= 1) {
+    isConnected = true;
+    return;
+  }
+
+  if (!process.env.MONGO_URI) {
+    console.error("Warning: MONGO_URI is not defined in environment variables");
+    return;
+  }
+
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    isConnected = true;
+    console.log("Connected to MongoDB");
+  } catch (err) {
+    console.error("Database connection error:", err);
+    throw err;
+  }
+};
+
+// Database connection middleware for serverless requests
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("Database connection middleware error:", err);
+    res.status(500).json({ success: false, message: "Database connection failed" });
+  }
+});
+
+// Start Server for local development (skipped when running as Vercel Serverless Function)
 const PORT = process.env.PORT || 5000;
 
-if (!process.env.MONGO_URI) {
-  console.error("Error: MONGO_URI is not defined in .env file");
-} else {
-  mongoose
-    .connect(process.env.MONGO_URI)
+if (!process.env.VERCEL) {
+  connectDB()
     .then(() => {
-      console.log("Connected to MongoDB");
       app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     })
-    .catch((err) => console.error("Database connection error:", err));
+    .catch((err) => console.error("Failed to start server locally:", err));
 }
 
 export default app;
